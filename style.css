@@ -1,0 +1,68 @@
+/* ========== Global Styling ========== */
+body {
+    background: #F7F9FC;
+    font-family: "Inter", sans-serif;
+    color: #2E4053;
+}
+header {
+    background: linear-gradient(135deg, #2F4F72, #1B263B);
+    color: white;
+    padding: 2rem;
+    border-radius: 0 0 12px 12px;
+    text-align: center;
+    margin-bottom: 2rem;
+}
+header h1 {
+    margin: 0;
+    font-family: "Poppins", sans-serif;
+}
+header p {
+    margin-top: .5rem;
+    opacity: .9;
+}
+.card {
+    background: white;
+    padding: 1.5rem;
+    border-radius: 12px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+    margin-bottom: 2rem;
+}
+.unit-card, .room-card {
+    border: 2px solid #e3e6ea;
+    border-radius: 10px;
+    background: #ffffff;
+    padding: 12px;
+    margin-bottom: 12px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.04);
+    text-align: center;
+    transition: all .2s ease;
+}
+.room-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 5px 10px rgba(0,0,0,0.08);
+}
+
+/* ========== Tabs Styling ========== */
+[data-baseweb="tab-list"] {
+    gap: 1rem;
+    justify-content: center;
+}
+[data-baseweb="tab"] {
+    color: #555;
+    background: #edf1f5;
+    border-radius: 8px;
+    padding: 10px 20px;
+    font-weight: 500;
+}
+[aria-selected="true"] {
+    background: #2F4F72;
+    color: white !important;
+}
+
+/* Buttons */
+button[kind="primary"] {
+    background-color: #2E86C1 !important;
+    color: white !important;
+    border-radius: 8px !important;
+    font-weight: 500 !important;
+}
