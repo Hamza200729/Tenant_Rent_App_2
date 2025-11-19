@@ -300,6 +300,9 @@ with tab_pay:
 # ==============================
 # 6. LEDGER TAB (FIXED)
 # ==============================
+# ==============================
+# 6. LEDGER TAB (SAFE VERSION)
+# ==============================
 with tab_ledger:
     st.subheader("📘 Tenant Ledger")
     
@@ -309,19 +312,36 @@ with tab_ledger:
         selected_t_id = st.selectbox("Select Tenant", tenants_list['id'], format_func=lambda x: tenants_list[tenants_list['id']==x]['name'].values[0])
         
         if selected_t_id:
-            # Get Invoices (Debits)
-            debits = pd.read_sql_query(f"SELECT due_date as Date, description as Item, amount as Debit, 0 as Credit FROM invoices WHERE tenant_id={selected_t_id}", db())
-            
-            # Get Payments (Credits)
-            credits = pd.read_sql_query(f"SELECT date as Date, 'Payment Received' as Item, 0 as Debit, amount as Credit FROM payments WHERE tenant_id={selected_t_id}", db())
-            
-            # Combine
-            ledger = pd.concat([debits, credits]).sort_values(by="Date")
-            
-            # Calculate Running Balance
-            ledger['Balance'] = (ledger['Debit'] - ledger['Credit']).cumsum()
-            
-            st.dataframe(ledger, use_container_width=True)
-            
-            total_due = ledger['Debit'].sum() - ledger['Credit'].sum()
-            st.metric("Current Outstanding Balance", f"₹{total_due}")
+            # --- SAFE GUARD START ---
+            # We wrap this in a try/except block. 
+            # If 'payments' table is missing, it won't crash.
+            try:
+                # Get Invoices (Debits)
+                debits = pd.read_sql_query(f"SELECT due_date as Date, description as Item, amount as Debit, 0 as Credit FROM invoices WHERE tenant_id={selected_t_id}", db())
+                
+                # Get Payments (Credits)
+                credits = pd.read_sql_query(f"SELECT date as Date, 'Payment Received' as Item, 0 as Debit, amount as Credit FROM payments WHERE tenant_id={selected_t_id}", db())
+                
+                # Combine
+                ledger = pd.concat([debits, credits]).sort_values(by="Date")
+                
+                # Calculate Running Balance
+                ledger['Balance'] = (ledger['Debit'] - ledger['Credit']).cumsum()
+                
+                st.dataframe(ledger, use_container_width=True)
+                
+                total_due = ledger['Debit'].sum() - ledger['Credit'].sum()
+                
+                # Color code the balance
+                if total_due > 0:
+                    st.error(f"Current Outstanding Balance: ₹{total_due}")
+                else:
+                    st.success(f"All Clear! Balance: ₹{total_due}")
+
+            except Exception as e:
+                st.warning("⚠️ The Ledger could not be loaded.")
+                st.info("This usually happens if the 'payments' table is missing. Please delete 'tenant.db' from your GitHub repo and restart the app to reset the database.")
+                st.error(f"Technical Error: {e}")
+            # --- SAFE GUARD END ---
+    else:
+        st.info("No tenants found. Add tenants in the 'Tenants' tab first.")
