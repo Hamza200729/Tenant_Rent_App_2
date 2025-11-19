@@ -1,9 +1,9 @@
 import streamlit as st, sqlite3, pandas as pd, os, datetime as dt
-from dateutil.relativedelta import relativedelta
 
 # ==============================
-# Database & Helpers
+# 1. DATABASE & SETUP
 # ==============================
+# We use the root folder so it works easily on GitHub
 DB_PATH = "tenant.db"
 
 # Ensure attachments folder exists
@@ -16,7 +16,10 @@ def db():
     return con
 
 def init_db():
-    """Initialize database tables including Payments."""
+    """
+    Initialize database tables.
+    This runs automatically to ensure the app doesn't crash on new installs.
+    """
     con = db()
     con.executescript("""
         CREATE TABLE IF NOT EXISTS tenants (
@@ -77,18 +80,20 @@ def run_query(sql, params=()):
         st.error(f"Database Error: {e}")
         return None
 
-# Initialize DB
+# Run initialization immediately
 if not os.path.exists(DB_PATH):
     init_db()
 else:
-    init_db() # Run anyway to ensure new tables (like payments) are added
+    # Run it anyway to ensure missing tables (like payments) are added
+    init_db()
+
 
 # ==============================
-# PAGE CONFIG
+# 2. PAGE CONFIG & STYLING
 # ==============================
 st.set_page_config(page_title="Tenant Manager", layout="wide")
 
-# CSS Loading
+# Load custom CSS if it exists, otherwise use default
 css_file = "style.css"
 if os.path.exists(css_file):
     with open(css_file) as f:
@@ -103,8 +108,9 @@ else:
     </style>
     """, unsafe_allow_html=True)
 
+
 # ==============================
-# HEADER
+# 3. HEADER & TABS
 # ==============================
 st.markdown("""
 <header>
@@ -112,15 +118,13 @@ st.markdown("""
 </header>
 """, unsafe_allow_html=True)
 
-# ==============================
-# TABS
-# ==============================
 tab_dash, tab_units, tab_tenants, tab_invoices, tab_pay, tab_ledger = st.tabs(
     ["🏠 Dashboard","🏢 Units","👥 Tenants","📄 Invoices","💰 Payments","📘 Ledger"]
 )
 
+
 # ==============================
-# 1. DASHBOARD TAB
+# TAB 1: DASHBOARD
 # ==============================
 with tab_dash:
     st.subheader("🏙️ Building Overview")
@@ -154,10 +158,11 @@ with tab_dash:
                     </div>
                     """, unsafe_allow_html=True)
     else:
-        st.info("No units found.")
+        st.info("No units found. Add them in the Units tab.")
+
 
 # ==============================
-# 2. UNITS TAB
+# TAB 2: UNITS
 # ==============================
 with tab_units:
     st.subheader("Add New Unit")
@@ -175,19 +180,22 @@ with tab_units:
     units = pd.read_sql_query("SELECT * FROM units", db())
     st.dataframe(units)
 
+
 # ==============================
-# 3. TENANTS TAB (FIXED)
+# TAB 3: TENANTS (With Delete)
 # ==============================
 with tab_tenants:
-    c1, c2 = st.columns([1, 2])
+    # Create 3 columns for Add, Assign, and Delete
+    c1, c2, c3 = st.columns([1, 1, 1])
     
+    # --- SECTION 1: ADD TENANT ---
     with c1:
-        st.markdown("### 1. Add New Tenant")
+        st.markdown("### 1. Add Tenant")
         with st.form("add_tenant"):
             t_name = st.text_input("Full Name")
             t_phone = st.text_input("Phone")
             t_email = st.text_input("Email")
-            if st.form_submit_button("Create Tenant Profile"):
+            if st.form_submit_button("Create Profile"):
                 if t_name:
                     run_query("INSERT INTO tenants (name, phone, email) VALUES (?,?,?)", (t_name, t_phone, t_email))
                     st.success(f"Tenant {t_name} created.")
@@ -195,11 +203,10 @@ with tab_tenants:
                 else:
                     st.error("Name required")
 
+    # --- SECTION 2: ASSIGN TO UNIT ---
     with c2:
-        st.markdown("### 2. Assign Tenant to Unit")
-        # Get Vacant Units
-        vacant_units = pd.read_sql_query("SELECT id, code, rent_amount FROM units WHERE status='vacant'", db())
-        # Get All Tenants
+        st.markdown("### 2. Assign to Unit")
+        vacant_units = pd.read_sql_query("SELECT id, code FROM units WHERE status='vacant'", db())
         all_tenants = pd.read_sql_query("SELECT id, name FROM tenants", db())
 
         if not vacant_units.empty and not all_tenants.empty:
@@ -208,29 +215,63 @@ with tab_tenants:
                 t_idx = st.selectbox("Select Tenant", all_tenants['id'], format_func=lambda x: all_tenants[all_tenants['id']==x]['name'].values[0])
                 
                 if st.form_submit_button("Assign & Move In"):
-                    # Update Unit status
                     run_query("UPDATE units SET status='occupied', current_tenant_id=? WHERE id=?", (t_idx, u_idx))
                     st.success("Tenant moved in successfully!")
                     st.rerun()
         else:
-            st.info("Need both Vacant Units and Tenants to assign.")
+            st.info("Need Vacant Unit & Tenant Profile to assign.")
+
+    # --- SECTION 3: DELETE TENANT ---
+    with c3:
+        st.markdown("### 3. Delete Tenant")
+        
+        tenants_to_delete = pd.read_sql_query("SELECT id, name FROM tenants", db())
+        
+        if not tenants_to_delete.empty:
+            with st.form("delete_tenant_form"):
+                del_id = st.selectbox("Select Tenant to Delete", tenants_to_delete['id'], format_func=lambda x: tenants_to_delete[tenants_to_delete['id']==x]['name'].values[0])
+                
+                # Warning checkbox
+                delete_history = st.checkbox("Delete all financial history?", value=False, help="Checking this will delete all Invoices and Payments associated with this tenant.")
+                
+                if st.form_submit_button("Delete Tenant"):
+                    try:
+                        # 1. Vacate any unit they are currently in
+                        run_query("UPDATE units SET status='vacant', current_tenant_id=NULL WHERE current_tenant_id=?", (del_id,))
+                        
+                        # 2. Optional: Delete financial history if checked
+                        if delete_history:
+                            run_query("DELETE FROM invoices WHERE tenant_id=?", (del_id,))
+                            run_query("DELETE FROM payments WHERE tenant_id=?", (del_id,))
+                        
+                        # 3. Delete the tenant profile
+                        run_query("DELETE FROM tenants WHERE id=?", (del_id,))
+                        
+                        st.success("Tenant deleted.")
+                        st.rerun()
+                        
+                    except Exception as e:
+                        st.error("Could not delete tenant.")
+                        st.warning("This tenant likely has invoices/payments. Check the box above to force delete them.")
+        else:
+            st.info("No tenants available.")
 
     st.divider()
     st.subheader("Tenant Directory")
     t_data = pd.read_sql_query("""
-        SELECT t.name, t.phone, u.code as unit
+        SELECT t.id, t.name, t.phone, t.email, u.code as current_unit
         FROM tenants t
         LEFT JOIN units u ON u.current_tenant_id = t.id
     """, db())
     st.dataframe(t_data, use_container_width=True)
 
+
 # ==============================
-# 4. INVOICES TAB (Required for Ledger)
+# TAB 4: INVOICES
 # ==============================
 with tab_invoices:
     st.subheader("Generate Rent Invoice")
     
-    # Get Occupied Units
     occupied = pd.read_sql_query("""
         SELECT u.id, u.code, u.rent_amount, t.name, t.id as tenant_id 
         FROM units u 
@@ -242,7 +283,6 @@ with tab_invoices:
         with st.form("inv_form"):
             unit_sel = st.selectbox("Select Unit", occupied['id'], format_func=lambda x: f"{occupied[occupied['id']==x]['code'].values[0]} - {occupied[occupied['id']==x]['name'].values[0]}")
             
-            # Auto-fill rent amount based on selection
             selected_row = occupied[occupied['id'] == unit_sel].iloc[0]
             amount = st.number_input("Amount", value=float(selected_row['rent_amount']))
             due_date = st.date_input("Due Date", dt.date.today())
@@ -259,23 +299,29 @@ with tab_invoices:
         st.warning("No occupied units found.")
 
     st.subheader("Recent Invoices")
-    invs = pd.read_sql_query("SELECT * FROM invoices ORDER BY id DESC", db())
-    st.dataframe(invs)
+    try:
+        invs = pd.read_sql_query("SELECT * FROM invoices ORDER BY id DESC", db())
+        st.dataframe(invs)
+    except:
+        st.write("No invoices yet.")
+
 
 # ==============================
-# 5. PAYMENTS TAB (Required for Ledger)
+# TAB 5: PAYMENTS
 # ==============================
 with tab_pay:
     st.subheader("Record Payment")
     
-    # Get Unpaid Invoices
-    unpaid = pd.read_sql_query("""
-        SELECT i.id, i.amount, u.code, t.name, i.unit_id, i.tenant_id
-        FROM invoices i
-        JOIN units u ON i.unit_id = u.id
-        JOIN tenants t ON i.tenant_id = t.id
-        WHERE i.status = 'unpaid'
-    """, db())
+    try:
+        unpaid = pd.read_sql_query("""
+            SELECT i.id, i.amount, u.code, t.name, i.unit_id, i.tenant_id
+            FROM invoices i
+            JOIN units u ON i.unit_id = u.id
+            JOIN tenants t ON i.tenant_id = t.id
+            WHERE i.status = 'unpaid'
+        """, db())
+    except:
+        unpaid = pd.DataFrame()
 
     if not unpaid.empty:
         with st.form("pay_form"):
@@ -286,62 +332,48 @@ with tab_pay:
             pay_date = st.date_input("Date", dt.date.today())
             
             if st.form_submit_button("Record Payment"):
-                # 1. Add to payments table
                 run_query("INSERT INTO payments (tenant_id, unit_id, amount, date, method) VALUES (?,?,?,?, 'Cash')", 
                           (int(row['tenant_id']), int(row['unit_id']), pay_amt))
                 
-                # 2. Mark invoice as paid
                 run_query("UPDATE invoices SET status='paid' WHERE id=?", (int(inv_id),))
                 st.success("Payment Recorded!")
                 st.rerun()
     else:
         st.info("No pending invoices.")
 
+
 # ==============================
-# 6. LEDGER TAB (FIXED)
-# ==============================
-# ==============================
-# 6. LEDGER TAB (SAFE VERSION)
+# TAB 6: LEDGER
 # ==============================
 with tab_ledger:
     st.subheader("📘 Tenant Ledger")
     
-    tenants_list = pd.read_sql_query("SELECT id, name FROM tenants", db())
-    
-    if not tenants_list.empty:
-        selected_t_id = st.selectbox("Select Tenant", tenants_list['id'], format_func=lambda x: tenants_list[tenants_list['id']==x]['name'].values[0])
+    try:
+        tenants_list = pd.read_sql_query("SELECT id, name FROM tenants", db())
         
-        if selected_t_id:
-            # --- SAFE GUARD START ---
-            # We wrap this in a try/except block. 
-            # If 'payments' table is missing, it won't crash.
-            try:
-                # Get Invoices (Debits)
-                debits = pd.read_sql_query(f"SELECT due_date as Date, description as Item, amount as Debit, 0 as Credit FROM invoices WHERE tenant_id={selected_t_id}", db())
-                
-                # Get Payments (Credits)
-                credits = pd.read_sql_query(f"SELECT date as Date, 'Payment Received' as Item, 0 as Debit, amount as Credit FROM payments WHERE tenant_id={selected_t_id}", db())
-                
-                # Combine
-                ledger = pd.concat([debits, credits]).sort_values(by="Date")
-                
-                # Calculate Running Balance
-                ledger['Balance'] = (ledger['Debit'] - ledger['Credit']).cumsum()
-                
-                st.dataframe(ledger, use_container_width=True)
-                
-                total_due = ledger['Debit'].sum() - ledger['Credit'].sum()
-                
-                # Color code the balance
-                if total_due > 0:
-                    st.error(f"Current Outstanding Balance: ₹{total_due}")
-                else:
-                    st.success(f"All Clear! Balance: ₹{total_due}")
+        if not tenants_list.empty:
+            selected_t_id = st.selectbox("Select Tenant for Ledger", tenants_list['id'], format_func=lambda x: tenants_list[tenants_list['id']==x]['name'].values[0])
+            
+            if selected_t_id:
+                # We use a TRY block here so the app doesn't crash if the 'payments' table 
+                # is missing (common issue when updating code on GitHub).
+                try:
+                    debits = pd.read_sql_query(f"SELECT due_date as Date, description as Item, amount as Debit, 0 as Credit FROM invoices WHERE tenant_id={selected_t_id}", db())
+                    credits = pd.read_sql_query(f"SELECT date as Date, 'Payment Received' as Item, 0 as Debit, amount as Credit FROM payments WHERE tenant_id={selected_t_id}", db())
+                    
+                    ledger = pd.concat([debits, credits]).sort_values(by="Date")
+                    ledger['Balance'] = (ledger['Debit'] - ledger['Credit']).cumsum()
+                    
+                    st.dataframe(ledger, use_container_width=True)
+                    
+                    total_due = ledger['Debit'].sum() - ledger['Credit'].sum()
+                    if total_due > 0:
+                        st.error(f"Outstanding Balance: ₹{total_due}")
+                    else:
+                        st.success(f"Balance Cleared: ₹{total_due}")
 
-            except Exception as e:
-                st.warning("⚠️ The Ledger could not be loaded.")
-                st.info("This usually happens if the 'payments' table is missing. Please delete 'tenant.db' from your GitHub repo and restart the app to reset the database.")
-                st.error(f"Technical Error: {e}")
-            # --- SAFE GUARD END ---
-    else:
-        st.info("No tenants found. Add tenants in the 'Tenants' tab first.")
+                except Exception as e:
+                    st.warning("⚠️ Database is updating...")
+                    st.info("If you see this, please restart the app or delete 'tenant.db' from the repo to reset the database structure.")
+    except Exception:
+        st.info("No tenants found.")
